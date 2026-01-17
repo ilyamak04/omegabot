@@ -22,6 +22,7 @@ DHT dht_sensor(DHTPIN, DHTTYPE);
 volatile bool LAMP_STATE   = false;
 volatile bool STOP_COMMAND = false;
 bool obstacle = false;
+volatile bool LOGS_ENABLED = false;
 
 
 class Driver {
@@ -351,6 +352,9 @@ void Driver::get_command_other(char command)
             case 'o':
                 turn_on_degree(360);
                 break;
+            case 'g':
+                autonomous_drive();
+                break;
             default:
                 break;
         }
@@ -381,20 +385,24 @@ void loop()
         obstacle = true;
     } else {
       obstacle = false;
-    }
 
+    
     if (!obstacle) {
-      char command = Wheels.read_command();
-      if (command != '0') { 
-          unsigned long currentMillis = millis();
-
-          Wheels.get_command_arm(command);
-          Wheels.get_command_wheels(command);
-          Wheels.get_command_other(command);
-
-          Wheels.write_logs(command, currentMillis);
-          Wheels.clear_serial_buffer();
-      }
+        char command = Wheels.read_command();
+        if (command != '0') { 
+            unsigned long currentMillis = millis();
+            if (command == 'l') {
+                LOGS_ENABLED = !LOGS_ENABLED;   
+            } else {
+                Wheels.get_command_arm(command);
+                Wheels.get_command_wheels(command);
+                Wheels.get_command_other(command);
+            }
+            if (LOGS_ENABLED && command != 'l') {
+                Wheels.write_logs(command, currentMillis);
+            }
+            Wheels.clear_serial_buffer();
+        }
     }
     delay(100);  // стабилизируем Serial поток
 }
