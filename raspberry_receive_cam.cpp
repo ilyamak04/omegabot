@@ -110,15 +110,7 @@ void videoStreamSender() {
     gst_init(nullptr, nullptr);
 
     // Создание элемента пайплайна GStreamer
-    std::string pipelineStr =
-        "v4l2src device=/dev/video0 io-mode=dmabuf ! "
-        "video/x-raw,width=1280,height=720,framerate=60/1 ! "
-        "v4l2h264enc extra-controls=\"controls,video_bitrate=4000000\" ! "
-        "h264parse ! "
-        "rtph264pay config-interval=1 pt=96 ! "
-        "udpsink host=" + std::string(SERVER_IP) +
-        " port=" + std::to_string(VIDEO_PORT) +
-        " sync=false async=false";
+    std::string pipelineStr = "v4l2src device=/dev/video0 ! image/jpeg, width=640, height=480, framerate=30/1 ! jpegparse ! avdec_mjpeg ! videoconvert ! x264enc tune=zerolatency bitrate=1000 speed-preset=ultrafast ! rtph264pay config-interval=1 pt=96 ! udpsink host=192.168.31.61 port=12346";
     GError* error = nullptr;
     GstElement* pipeline = gst_parse_launch(pipelineStr.c_str(), &error);
 
