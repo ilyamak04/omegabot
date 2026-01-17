@@ -7,17 +7,21 @@
 
 #define SENSOR_DIST_FRONT       A3
 #define SENSOR_DIST_SIDE        A0
-#define SENSOR_LIGHT            A1
-#define AUDIO_PIN               11
-#define LAMP_PIN                10
 
 #define DHTPIN                  9
 #define DHTTYPE                 DHT11
+
+#define TRIG_PIN                10
+#define ECHO_PIN                11
+#define MAX_DIST                10
+
+#define SENSOR_LIGHT            3
 
 DHT dht_sensor(DHTPIN, DHTTYPE);
 
 volatile bool LAMP_STATE   = false;
 volatile bool STOP_COMMAND = false;
+bool obstacle = false;
 
 
 class Driver {
@@ -27,14 +31,9 @@ public:
     
     void set_motors(const int velo_left, const int velo_right);
     void stop_motors();
-    void drive_forward_until(const int dist);
     void connection_lost_case();
     void inspection();
     void turn_on_degree(const int degree);
-    void autonomous_drive();  // Добавлено объявление
-
-    void arm(const int power);
-    void hand(const int power);
 
     char read_command();
     void clear_serial_buffer();
@@ -42,31 +41,25 @@ public:
     void get_command_arm(char command);     // Исправлена опечатка
     void get_command_other(char command);   // Исправлена опечатка
 
-    long int get_distance(uint8_t sensor);  // Добавлен параметр
+    long int get_distance();
     double get_temperature();
     double get_humidity();
-    
-    void sound_signal(const int delay_time);
     
     void write_logs(char command, unsigned long time);
 
 private:
     Servo servo_arm;
     Servo servo_hand;
-    uint8_t pos_servo_arm;
-    uint8_t pos_servo_hand;
-    uint8_t pin_servo_arm;
-    uint8_t pin_servo_hand;
     int pin_motor_left;
     int pin_motor_right;
     int pin_motor_dir_left;
     int pin_motor_dir_right;
+    int speed;
     
 private:
     char last_msg_hand;
     char previos_command;
     unsigned long previous_command_time = 0;
-    int speed;
     int rotation_speed; 
     int rotation_time;          //milliseconds
 };
@@ -74,8 +67,7 @@ private:
 
 Driver::Driver(int left_pin, int right_pin, int left_dir_pin, int right_dir_pin, int servo_arm_pin, int servo_hand_pin, int motor_speed) 
     : pin_motor_left(left_pin), pin_motor_right(right_pin), pin_motor_dir_left(left_dir_pin), pin_motor_dir_right(right_dir_pin), 
-      speed(motor_speed), pin_servo_arm(servo_arm_pin), pin_servo_hand(servo_hand_pin),
-      pos_servo_arm(0), pos_servo_hand(0), last_msg_hand('0'), previos_command('0'), rotation_time(1120)
+      speed(motor_speed), last_msg_hand('0'), previos_command('0'), rotation_time(1120)
 {
     pinMode(pin_motor_left, OUTPUT);
     pinMode(pin_motor_right, OUTPUT);
@@ -84,12 +76,10 @@ Driver::Driver(int left_pin, int right_pin, int left_dir_pin, int right_dir_pin,
     pinMode(SENSOR_DIST_FRONT, INPUT);
     pinMode(SENSOR_DIST_SIDE, INPUT);
     pinMode(SENSOR_LIGHT, INPUT);  // Добавлено
-    pinMode(AUDIO_PIN, OUTPUT);
-    pinMode(LAMP_PIN, OUTPUT);
     dht_sensor.begin();
 
-    servo_arm.attach(pin_servo_arm);
-    servo_hand.attach(pin_servo_hand);
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
     rotation_speed  = 0.5 * speed;
 
     set_motors(0, 0);
@@ -143,27 +133,13 @@ void Driver::write_logs(char command, unsigned long time)
 {
     double temp = get_temperature();
     double hum  = get_humidity();
-    int brightness = analogRead(SENSOR_LIGHT);
-    long int dist_forw = get_distance(SENSOR_DIST_FRONT);  // Исправлен тип
-    long int dist_side = get_distance(SENSOR_DIST_SIDE);   // Исправлен тип
 
     String log_msg;
-    log_msg = "Time: " + String(time) + "; Command: " + String(command) + "; Dist. Forw.: " + String(dist_forw) 
-            + "; Dist. Side: " + String(dist_side) + "; Temperature: " + String(temp, 2) + "; Humidity: "
-            + String(hum, 2) + "; Brightness: " + String(brightness) + " %";
+    log_msg = "Time: " + String(time) + "; Command: " + String(command) + "; Dist. Forw.: " 
+            + "; Dist. Side: " + "; Temperature: " + String(temp, 2) + "; Humidity: "
+            + String(hum, 2) + " %";
 
     Serial.println(log_msg);
-}
-
-
-void Driver::sound_signal(const int delay_time)
-{
-    int time = delay_time;
-    if (delay_time > 1000) time = 1000;
-    digitalWrite(AUDIO_PIN, HIGH);
-    delay(time);
-    digitalWrite(AUDIO_PIN, LOW);
-    delay(time);
 }
 
 
@@ -208,58 +184,24 @@ double Driver::get_humidity()
 }
 
 
-long int Driver::get_distance(uint8_t sensor)
-{
-    long int IR_value = analogRead(sensor);
-    // Безопасная проверка на ноль перед логарифмированием
-    if (IR_value <= 0) return 3 * CRITICAL_DISTANCE;
+long Driver::get_distance() {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+
+    // Считаем время возвращения эха
+    long duration = pulseIn(ECHO_PIN, HIGH, 30000); // Таймаут 30 мс (~5 м)
     
-    double log_val = log10((double)IR_value / 1821.2);
-    if (log_val >= 0) return 3 * CRITICAL_DISTANCE;  // Защита от отрицательного логарифма
-    
-    long int distance = pow(10, log_val / -0.65);
-    if (distance <= 0) distance = 3 * CRITICAL_DISTANCE;
-    return distance;
-}
+    long distance_cm;
 
-
-void Driver::drive_forward_until(const int dist)
-{
-    while (get_distance(SENSOR_DIST_FRONT) > dist) {
-        set_motors(speed, speed);
-        if (read_command() == 's' || STOP_COMMAND) break;
-        delay(10);  // Добавлена небольшая задержка
-    }
-
-    stop_motors();
-    sound_signal(100);
-}
-
-
-void Driver::autonomous_drive()
-{
-    long int dist_front, dist_side;
-    int e;
-    double u;
-
-    double kp = 2.5;
-
-    while (read_command() != 's' && !STOP_COMMAND) {
-        dist_front = get_distance(SENSOR_DIST_FRONT);
-        dist_side = get_distance(SENSOR_DIST_SIDE);
-
-        if (dist_front <= CRITICAL_DISTANCE) {
-            stop_motors();
-            turn_on_degree(45);
-        }
-
-        e = CRITICAL_DISTANCE * 0.9 - dist_side;
-        u = kp * e;
-        // Ограничение скорости
-        int left_speed = constrain(110 - (int)u, -255, 255);
-        int right_speed = constrain(110 + (int)u, -255, 255);
-        set_motors(left_speed, right_speed);
-        delay(10);
+    if (duration == 0) {
+        distance_cm = -1;  // Если нет сигнала
+        return distance_cm;
+    } else {
+        distance_cm = duration * 0.034 / 2; // Преобразуем в см
+        return distance_cm;
     }
 }
 
@@ -267,7 +209,6 @@ void Driver::autonomous_drive()
 void Driver::connection_lost_case()
 {
     stop_motors();
-    sound_signal(100);
 
     const int delay_time = 10;     
     const int drive_time = 2000;   
@@ -282,10 +223,6 @@ void Driver::connection_lost_case()
     }
 
     stop_motors();
-
-    sound_signal(50);
-    sound_signal(100);
-    sound_signal(200);
 }
 
 
@@ -318,7 +255,6 @@ void Driver::inspection()
 
     while (forward_counter < counter_limit) {
         set_motors(150, 150);
-        if (get_distance(SENSOR_DIST_FRONT) < CRITICAL_DISTANCE * 1.5) break;
         if (read_command() == 's' || STOP_COMMAND) break;
         delay(delay_time);
         forward_counter++;
@@ -340,24 +276,6 @@ void Driver::inspection()
     }
 
     stop_motors();
-    sound_signal(100);
-}
-
-
-void Driver::arm(const int power)
-{
-    pos_servo_arm = constrain(pos_servo_arm + ((power > 0) ? 5 : -5), 0, 45);
-    servo_arm.write(pos_servo_arm);
-}
-
-
-void Driver::hand(const int power)
-{
-    if (power > 0) {
-        servo_hand.write(10);
-    } else {
-        servo_hand.write(150);
-    }
 }
 
 
@@ -370,7 +288,6 @@ void Driver::get_command_wheels(char command)
 
     STOP_COMMAND = false;
     LAMP_STATE = !LAMP_STATE;
-    digitalWrite(LAMP_PIN, LAMP_STATE);
 
     switch (command) {
         case 's':
@@ -401,30 +318,11 @@ void Driver::get_command_arm(char command)
     if (command != '0') {
         STOP_COMMAND = false;
         LAMP_STATE = !LAMP_STATE;
-        digitalWrite(LAMP_PIN, LAMP_STATE);
 
         switch (command) {
             case 's':
                 STOP_COMMAND = true;
                 stop_motors();
-                break;
-            case '5':
-                arm(100);   // Вверх
-                break;
-            case '6':
-                arm(-100);  // Вниз
-                break;
-            case '7':
-                if (command != last_msg_hand) {
-                    hand(100);  // Сжать
-                    last_msg_hand = command;
-                }
-                break;
-            case '8':
-                if (command != last_msg_hand) {
-                    hand(-100);  // Разжать
-                    last_msg_hand = command;
-                }
                 break;
             default:
                 break;
@@ -438,15 +336,11 @@ void Driver::get_command_other(char command)
     if (command != '0') {
         STOP_COMMAND = false;
         LAMP_STATE = !LAMP_STATE;
-        digitalWrite(LAMP_PIN, LAMP_STATE);
 
         switch (command) {
             case 's':
                 STOP_COMMAND = true;
                 stop_motors();
-                break;
-            case 'f':
-                drive_forward_until(CRITICAL_DISTANCE);
                 break;
             case 'e':
                 connection_lost_case();
@@ -457,9 +351,6 @@ void Driver::get_command_other(char command)
             case 'o':
                 turn_on_degree(360);
                 break;
-            case 'g':
-                autonomous_drive();
-                break;  // Добавлен break
             default:
                 break;
         }
@@ -480,17 +371,30 @@ void setup()
 
 void loop()
 {
-    char command = Wheels.read_command();
-    if (command != '0') { 
-        unsigned long currentMillis = millis();
+    long distance = Wheels.get_distance();
 
-        Wheels.get_command_arm(command);
-        Wheels.get_command_wheels(command);
-        Wheels.get_command_other(command);
-
-        Wheels.write_logs(command, currentMillis);
-
-        Wheels.clear_serial_buffer();
+    if (distance < 5) {
+        Wheels.stop_motors();
+        if (obstacle) {
+          Serial.println("Obstacle detected! Motors stopped.");
+        }
+        obstacle = true;
+    } else {
+      obstacle = false;
     }
-    delay(10);  // Небольшая задержка для стабильности
+
+    if (!obstacle) {
+      char command = Wheels.read_command();
+      if (command != '0') { 
+          unsigned long currentMillis = millis();
+
+          Wheels.get_command_arm(command);
+          Wheels.get_command_wheels(command);
+          Wheels.get_command_other(command);
+
+          Wheels.write_logs(command, currentMillis);
+          Wheels.clear_serial_buffer();
+      }
+    }
+    delay(100);  // стабилизируем Serial поток
 }
