@@ -367,7 +367,7 @@ void loop()
         obstacle = true;
     } else {
       obstacle = false;
-
+    }
     
     if (!obstacle) {
         char command = Wheels.read_command();
