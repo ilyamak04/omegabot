@@ -171,14 +171,9 @@ private:
     void startVideoOpenThread() {
         // Подготовим пайплайн один раз
         const std::string gst_pipeline =
-            "udpsrc port=" + std::to_string(VIDEO_PORT) + " caps=\"application/x-rtp, media=video, "
-            "encoding-name=H264, payload=96, clock-rate=90000\" ! "
-            "rtpjitterbuffer latency=20 drop-on-late=true ! "
-            "rtph264depay ! "
-            "h264parse ! "
-            "avdec_h264 ! "
-            "videoconvert ! "
-            "appsink sync=false max-buffers=1 drop=true";
+            "udpsrc port=12346 caps=\"application/x-rtp, media=video, encoding-name=H264, payload=96\" ! "
+            "rtph264depay ! avdec_h264 ! videoconvert ! appsink sync=false";
+
 
         videoOpenThread = std::thread([this, gst_pipeline]() {
             bool ok = cap.open(gst_pipeline, cv::CAP_GSTREAMER);
