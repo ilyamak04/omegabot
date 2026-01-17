@@ -100,6 +100,9 @@ void receive_logs(QTextEdit* log_widget) {
 // --- Класс главного окна ---
 class ControllerWindow : public QWidget {
     Q_OBJECT
+private:
+    char currentCommand = 's';  
+    QTimer* commandTimer = nullptr;  
 public:
     explicit ControllerWindow(QWidget* parent = nullptr)
         : QWidget(parent)
@@ -124,6 +127,11 @@ public:
         timer->start(33);
 
         startVideoOpenThread();
+        commandTimer = new QTimer(this);
+        connect(commandTimer, &QTimer::timeout, [this]() {
+            if (command_sock != -1) sendCommand(currentCommand);
+        });
+        commandTimer->start(50);
     }
 
     ~ControllerWindow() override {
@@ -135,29 +143,30 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent* event) override {
-        char command = 0;
-        switch (event->key()) {
-            case Qt::Key_W: command = '1'; break;
-            case Qt::Key_S: command = '2'; break;
-            case Qt::Key_D: command = '3'; break;
-            case Qt::Key_A: command = '4'; break;
-            case Qt::Key_Y: command = 'y'; do_not_stop = true; break;
-            case Qt::Key_O: command = 'o'; do_not_stop = true; break;
-            case Qt::Key_Space: command = 's'; break;
-            case Qt::Key_1: command = 'f'; do_not_stop = true; break;
-            case Qt::Key_Up: command = '5'; break;
-            case Qt::Key_Down: command = '6'; break;
-            case Qt::Key_Left: command = '7'; break;
-            case Qt::Key_Right: command = '8'; break;
-            case Qt::Key_Escape: running = false; running_logs = false; break;
-        }
-        if (command && command_sock != -1) sendCommand(command);
+    switch (event->key()) {
+        case Qt::Key_W: currentCommand = '1'; break;
+        case Qt::Key_S: currentCommand = '2'; break;
+        case Qt::Key_D: currentCommand = '3'; break;
+        case Qt::Key_A: currentCommand = '4'; break;
+        case Qt::Key_Y: currentCommand = 'y'; do_not_stop = true; break;
+        case Qt::Key_O: currentCommand = 'o'; do_not_stop = true; break;
+        case Qt::Key_Space: currentCommand = 's'; break;
+        case Qt::Key_1: currentCommand = 'f'; do_not_stop = true; break;
+        case Qt::Key_Up: currentCommand = '5'; break;
+        case Qt::Key_Down: currentCommand = '6'; break;
+        case Qt::Key_Left: currentCommand = '7'; break;
+        case Qt::Key_Right: currentCommand = '8'; break;
+        case Qt::Key_Escape: running = false; running_logs = false; break;
     }
+}
 
-    void keyReleaseEvent(QKeyEvent* /*event*/) override {
-        if (do_not_stop) { do_not_stop = false; return; }
-        if (command_sock != -1) sendCommand('s');
+void keyReleaseEvent(QKeyEvent* /*event*/) override {
+    if (do_not_stop) { do_not_stop = false; return; }
+    // Сброс на стоп только для команд движения (1-4)
+    if (currentCommand >= '1' && currentCommand <= '4') {
+        currentCommand = 's';
     }
+}
 
 private:
     QLabel* video_label = nullptr;
