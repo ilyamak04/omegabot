@@ -314,24 +314,6 @@ void Driver::get_command_wheels(char command)
 }
 
 
-void Driver::get_command_arm(char command)
-{
-    if (command != '0') {
-        STOP_COMMAND = false;
-        LAMP_STATE = !LAMP_STATE;
-
-        switch (command) {
-            case 's':
-                STOP_COMMAND = true;
-                stop_motors();
-                break;
-            default:
-                break;
-        }
-    }
-}
-
-
 void Driver::get_command_other(char command)
 {
     if (command != '0') {
@@ -404,5 +386,5 @@ void loop()
             Wheels.clear_serial_buffer();
         }
     }
-    delay(100);  // стабилизируем Serial поток
+    delay(100);  
 }
